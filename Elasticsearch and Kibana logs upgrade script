@@ -1,0 +1,187 @@
+Automation Script for Kibana Elastic search logs Uprade
+
+#!/bin/bash
+# Elasticsearch Automated Upgrade Script
+
+CURRENT_VERSION="$(rpm -q --qf '%{VERSION}' elasticsearch 2>/dev/null || \ dpkg-query -W -f='${Version}' elasticsearch 2>/dev/null || echo "unknown")"
+
+BACKUP_DIR="/var/backups/elasticsearch"
+LOG_FILE="/var/log/elasticsearch-upgrade.log"
+
+# 1. Pre-upgrade checks
+
+echo > Checking Elasticsearch service..." | tee -a "$LOG_FILE"
+
+systemctl is-active --quiet elasticsearch || {
+    echo "ERROR: Elasticsearch is not running."
+    exit 1
+}
+
+curl -fsS http://localhost:9200/ >/tmp/es_info.json
+
+echo "Elasticsearch is responding." | tee -a "$LOG_FILE"
+
+
+# 2. Cluster health
+
+curl -fsS \
+    "http://localhost:9200/_cluster/health?pretty" \
+    | tee -a "$LOG_FILE"
+
+
+# 3. Create local configuration backup
+
+mkdir -p "$BACKUP_DIR"
+
+tar -czf \
+    "$BACKUP_DIR/elasticsearch-config-$(date +%Y%m%d-%H%M%S).tar.gz" \
+    /etc/elasticsearch
+
+echo "Configuration backup completed." | tee -a "$LOG_FILE"
+
+# 4. Check disk space
+
+df -h /var/lib/elasticsearch | tee -a "$LOG_FILE"
+
+# 5. Stop Elasticsearch
+systemctl stop elasticsearch
+
+
+# 6. Upgrade package
+
+echo "[6/8] Installing Elasticsearch $TARGET_VERSION..." \
+    | tee -a "$LOG_FILE"
+
+if command -v dnf >/dev/null 2>&1; then
+
+    dnf install -y \
+        "elasticsearch-${TARGET_VERSION}"
+
+elif command -v yum >/dev/null 2>&1; then
+
+    yum install -y \
+        "elasticsearch-${TARGET_VERSION}"
+
+elif command -v apt-get >/dev/null 2>&1; then
+
+    apt-get update
+    apt-get install -y \
+        "elasticsearch=${TARGET_VERSION}"
+
+else
+    echo "ERROR: Unsupported package manager."
+    exit 1
+fi
+
+
+# 7. Start Elasticsearch
+
+systemctl daemon-reload
+systemctl enable elasticsearch
+systemctl start elasticsearch
+
+
+
+# 8. Verify installation
+
+echo "Verifying Elasticsearch..." | tee -a "$LOG_FILE"
+
+curl -fsS \
+    "http://localhost:9200/?pretty" \ | tee -a "$LOG_FILE"
+
+curl -fsS \
+    "http://localhost:9200/_cluster/health?pretty" \ | tee -a "$LOG_FILE"
+
+echo "==================================================" | tee -a "$LOG_FILE"
+echo " Elasticsearch upgrade completed successfully." \ | tee -a "$LOG_FILE"
+echo " Completed: $(date)" | tee -a "$LOG_FILE"
+echo "==================================================" | tee -a "$LOG_FILE"
+
+Kibana Upgrade script 
+ 
+ #!/bin/bash
+
+LOG_FILE="/var/log/kibana-upgrade.log"
+
+# 1. Check Kibana
+systemctl is-active --quiet kibana || {
+    echo "WARNING: Kibana is not currently running."
+}
+
+
+# 2. Backup configuration
+
+mkdir -p "$BACKUP_DIR"
+
+tar -czf \
+    "$BACKUP_DIR/kibana-config-$(date +%Y%m%d-%H%M%S).tar.gz" \
+    /etc/kibana
+
+
+# 3. Backup Kibana keystore
+
+if [ -f /etc/kibana/kibana.keystore ]; then
+
+    cp \
+        /etc/kibana/kibana.keystore \
+        "$BACKUP_DIR/kibana.keystore-$(date +%Y%m%d-%H%M%S)"
+
+fi
+
+
+# 4. Stop Kibana
+
+systemctl stop kibana
+
+
+# 5. Upgrade Kibana
+
+echo "[4/7] Installing Kibana $TARGET_VERSION..." \ | tee -a "$LOG_FILE"
+
+if command -v dnf >/dev/null 2>&1; then
+
+    dnf install -y \
+        "kibana-${TARGET_VERSION}"
+
+elif command -v yum >/dev/null 2>&1; then
+
+    yum install -y \
+        "kibana-${TARGET_VERSION}"
+
+elif command -v apt-get >/dev/null 2>&1; then
+
+    apt-get update
+    apt-get install -y \
+        "kibana=${TARGET_VERSION}"
+
+else
+    echo "ERROR: Unsupported package manager."
+    exit 1
+fi
+
+# 6. Start Kibana
+
+systemctl daemon-reload
+systemctl enable kibana
+systemctl start kibana
+
+echo "Waiting for Kibana..." | tee -a "$LOG_FILE"
+
+sleep 30
+
+
+# 7. Verify Kibana
+
+systemctl status kibana --no-pager \ | tee -a "$LOG_FILE"
+
+echo "[7/7] Testing Kibana HTTP endpoint..." \| tee -a "$LOG_FILE"
+
+curl -fsS \
+    http://localhost:5601/api/status \
+    -H "kbn-xsrf: true" \
+    | tee -a "$LOG_FILE"
+
+echo "==================================================" | tee -a "$LOG_FILE"
+echo " Kibana upgrade completed successfully."
+echo " Completed: $(date)"
+echo "==================================================" | tee -a "$LOG_FILE"
